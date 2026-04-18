@@ -1,0 +1,2 @@
+# WBGT_atsusasisu_keijiban
+WBGT暑さ指数掲示板
