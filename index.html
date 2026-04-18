@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>暑さ指数(WBGT) 掲示板システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; }
+        .tab-active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
+        .tab-inactive { background-color: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+        
+        /* ヘッダー内の場所切り替え用スタイル */
+        .loc-active { background-color: white; color: #dc2626; font-weight: 900; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .loc-inactive { background-color: rgba(255,255,255,0.2); color: white; font-weight: 500; }
+        .loc-inactive:hover { background-color: rgba(255,255,255,0.3); }
+
+        /* 運動指針のカラー定義 */
+        .bg-danger { background-color: #ef4444; color: white; }
+        .bg-severe { background-color: #f97316; color: black; }
+        .bg-warning { background-color: #fde047; color: black; }
+        .bg-caution { background-color: #a3e635; color: black; }
+        .bg-safe { background-color: #67e8f9; color: black; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+    <!-- ナビゲーション -->
+    <header class="bg-red-600 shadow-xl px-4 py-3 flex flex-row items-center justify-between sticky top-0 z-50 gap-2 border-b-4 border-red-700 overflow-x-auto whitespace-nowrap">
+        
+        <h1 class="text-xl md:text-2xl font-black text-white flex items-center gap-2 shrink-0">
+            <i data-lucide="thermometer-sun" class="text-white w-6 h-6 md:w-8 md:h-8"></i>
+            暑さ指数掲示板
+        </h1>
+
+        <div class="flex bg-red-800/40 p-1 rounded-lg gap-1 shrink-0">
+            <button onclick="switchGlobalLocation('校庭')" id="header-loc-校庭" class="py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-active">
+                <i data-lucide="sun" class="w-4 h-4 md:w-5 md:h-5"></i> 校庭
+            </button>
+            <button onclick="switchGlobalLocation('体育館')" id="header-loc-体育館" class="py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-inactive">
+                <i data-lucide="building-2" class="w-4 h-4 md:w-5 md:h-5"></i> 体育館
+            </button>
+        </div>
+
+        <div class="flex bg-red-700 p-1 rounded-lg shadow-inner shrink-0" role="group">
+            <button onclick="switchTab('board')" id="tab-board" class="tab-active px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded-l transition-all">
+                掲示板
+            </button>
+            <button onclick="switchTab('api')" id="tab-api" class="tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border-t border-b hover:bg-gray-100 transition-all">
+                API取得
+            </button>
+            <button onclick="switchTab('input')" id="tab-input" class="tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold rounded-r hover:bg-gray-100 transition-all border">
+                手動入力
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow p-4 md:p-6 max-w-7xl mx-auto w-full">
+
+        <!-- 1. 認証画面 -->
+        <div id="view-auth" class="hidden flex flex-col items-center justify-center py-20 bg-white rounded-lg shadow-md border-t-4 border-red-500">
+            <div class="bg-red-50 p-4 rounded-full mb-4">
+                <i data-lucide="shield-alert" class="w-12 h-12 text-red-500"></i>
+            </div>
+            <h2 class="text-2xl font-bold mb-2 text-gray-800">管理機能はロックされています</h2>
+            <p class="text-gray-500 mb-8 text-sm text-center">データの登録・変更を行うには<br>管理者用パスコードを入力してください。</p>
+            <div class="flex flex-col items-center gap-4 w-full max-w-xs">
+                <input type="password" id="passcode-input" autocomplete="new-password" class="border-2 border-gray-300 rounded-lg p-4 text-center text-3xl tracking-[1em] w-full outline-none focus:border-blue-500 transition-all shadow-inner" placeholder="****" onkeypress="if(event.key === 'Enter') verifyPasscode()">
+                <button onclick="verifyPasscode()" class="bg-blue-600 hover:bg-blue-700 text-white font-black py-4 px-8 rounded-lg shadow-lg w-full transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="lock-open"></i> ロック解除
+                </button>
+                <p id="auth-error" class="text-red-600 font-bold mt-2 hidden">パスコードが正しくありません</p>
+            </div>
+        </div>
+
+        <!-- 2. 掲示板タブ -->
+        <div id="view-board" class="space-y-6">
+            <div class="flex flex-col gap-6">
+                <div class="w-full space-y-4">
+                    <div class="flex justify-between items-center bg-white p-4 rounded-lg shadow">
+                        <button onclick="changeBoardDate(-1)" class="p-2 md:p-3 hover:bg-gray-100 rounded-full transition-colors"><i data-lucide="chevron-left" class="w-8 h-8"></i></button>
+                        <!-- 今日の日付へ戻るショートカットを追加 -->
+                        <div class="flex flex-col items-center">
+                            <h3 id="board-date-display" class="text-2xl md:text-5xl font-black text-gray-800 text-center">日付を取得中...</h3>
+                            <button onclick="resetBoardDateToToday()" class="text-xs text-blue-600 mt-1 hover:underline font-bold">今日に戻る</button>
+                        </div>
+                        <button onclick="changeBoardDate(1)" class="p-2 md:p-3 hover:bg-gray-100 rounded-full transition-colors"><i data-lucide="chevron-right" class="w-8 h-8"></i></button>
+                    </div>
+                    <div class="bg-white rounded-lg shadow overflow-hidden border-4 border-gray-800">
+                        <table class="w-full text-center border-collapse">
+                            <thead>
+                                <tr class="bg-cyan-400 text-gray-900 font-black text-xl md:text-2xl border-b-4 border-gray-800">
+                                    <th class="py-4 px-2 border-r-2 border-gray-800">時間</th>
+                                    <th class="py-4 px-2 border-r-2 border-gray-800">天気</th>
+                                    <th class="py-4 px-2 border-r-2 border-gray-800 text-sm md:text-2xl">暑さ指数(℃)</th>
+                                    <th class="py-4 px-2 border-r-2 border-gray-800">運動指針</th>
+                                    <th class="py-4 px-2 border-r-2 border-gray-800">気温(℃)</th>
+                                    <th class="py-4 px-2">湿度(%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="board-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. API取得タブ -->
+        <div id="view-api" class="hidden space-y-6">
+            <div class="bg-white p-8 rounded-lg shadow-md border-t-4 border-indigo-500 max-w-3xl mx-auto">
+                <div class="flex justify-between items-center border-b pb-4 mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                        <i data-lucide="cloud-download" class="text-indigo-500"></i> 気象API連携
+                    </h2>
+                    <button onclick="lockEditor()" class="text-xs text-red-600 border border-red-300 hover:bg-red-50 px-3 py-1.5 rounded flex items-center gap-1 font-bold">
+                        <i data-lucide="lock" class="w-3 h-3"></i> 管理終了・ロック
+                    </button>
+                </div>
+                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 text-sm text-yellow-800 font-bold">
+                    APIは屋外（校庭）の気象データです。保存先拠点を確認してください。
+                </div>
+                <div class="flex flex-col md:flex-row items-end gap-4 mb-8">
+                    <div class="flex-grow w-full">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">都道府県</label>
+                                <select id="api-pref" onchange="loadCities()" class="w-full border-gray-300 rounded-md shadow-sm p-3 border text-lg"></select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">市区町村</label>
+                                <select id="api-city" onchange="updateCoordinates()" class="w-full border-gray-300 rounded-md shadow-sm p-3 border text-lg" disabled></select>
+                            </div>
+                        </div>
+                        <input type="hidden" id="api-lat"><input type="hidden" id="api-lon">
+                    </div>
+                    <button onclick="fetchWeatherData()" id="btn-fetch" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded shadow transition-colors flex items-center gap-2 whitespace-nowrap h-[52px]" disabled>
+                        <i data-lucide="refresh-cw" id="icon-fetch"></i> 取得
+                    </button>
+                </div>
+                <div id="api-result-area" class="hidden">
+                    <div class="grid grid-cols-3 gap-4 mb-6 text-center">
+                        <div class="bg-gray-50 p-4 rounded border"><p class="text-sm text-gray-500">天気</p><p id="api-res-weather" class="text-3xl mt-1">-</p></div>
+                        <div class="bg-gray-50 p-4 rounded border"><p class="text-sm text-gray-500">気温</p><p id="api-res-temp" class="text-3xl font-bold mt-1">-℃</p></div>
+                        <div class="bg-gray-50 p-4 rounded border"><p class="text-sm text-gray-500">湿度</p><p id="api-res-humidity" class="text-3xl font-bold mt-1">-%</p></div>
+                    </div>
+                    <div class="bg-red-50 p-6 rounded-lg border-2 border-red-200 text-center mb-6">
+                        <p id="api-res-wbgt" class="text-5xl font-black text-red-700">-</p>
+                        <p id="api-res-guidance" class="mt-2 font-bold text-xl">-</p>
+                    </div>
+
+                    <div class="mb-6 bg-gray-100 p-4 rounded flex items-center justify-center gap-4 border">
+                        <label class="font-bold text-gray-700">保存先拠点:</label>
+                        <select id="api-save-location" class="border-2 border-blue-500 p-2 rounded font-bold text-blue-700 bg-white">
+                            <option value="校庭">校庭</option>
+                            <option value="体育館">体育館</option>
+                        </select>
+                    </div>
+
+                    <button onclick="saveApiDataToDb()" id="btn-save-api" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded shadow-md transition-colors text-lg flex justify-center items-center gap-2">
+                        <i data-lucide="upload-cloud"></i> 掲示板に反映して保存
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. 手動入力タブ -->
+        <div id="view-input" class="hidden space-y-6">
+            <div id="editor-screen" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-1 bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500">
+                    <div class="flex justify-between items-center border-b pb-2 mb-4">
+                        <h2 class="text-lg font-bold flex items-center gap-2">
+                            <i data-lucide="plus-circle" class="text-blue-500"></i> <span id="input-form-title">校庭</span>への登録
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <button onclick="showPasscodeModal()" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-2 py-1 rounded">鍵変更</button>
+                            <button onclick="lockEditor()" class="text-xs text-red-600 border border-red-300 hover:bg-red-50 px-2 py-1 rounded font-bold">ロック</button>
+                        </div>
+                    </div>
+                    <form id="data-form" class="space-y-4" onsubmit="handleFormSubmit(event)">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-sm font-medium mb-1 text-gray-700">日付</label><input type="date" id="input-date" required class="w-full border rounded p-2"></div>
+                            <div><label class="block text-sm font-medium mb-1 text-gray-700">時間</label><div class="flex items-center gap-1"><select id="input-hour" class="w-full border rounded p-2"></select>:<select id="input-minute" class="w-full border rounded p-2"></select></div></div>
+                        </div>
+                        <div><label class="block text-sm font-medium mb-1 text-gray-700">天気</label><select id="input-weather" class="w-full border rounded p-2"><option value="☀️">☀️ 晴れ</option><option value="⛅">⛅ 晴れ時々曇り</option><option value="☁️">☁️ 曇り</option><option value="☂️">☂️ 雨</option></select></div>
+                        <div><label class="block text-sm font-bold text-red-600 mb-1">暑さ指数 (WBGT) ℃</label><input type="number" step="0.1" id="input-wbgt" required class="w-full border-red-300 rounded p-2 bg-red-50 font-bold text-lg text-center shadow-inner"></div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-sm font-medium mb-1 text-gray-700">気温 (℃)</label><input type="number" step="0.1" id="input-temp" class="w-full border rounded p-2"></div>
+                            <div><label class="block text-sm font-medium mb-1 text-gray-700">湿度 (%)</label><input type="number" step="0.1" id="input-humidity" class="w-full border rounded p-2"></div>
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-lg shadow-md mt-2 transition-all text-xl">データを保存</button>
+                    </form>
+                </div>
+                <div class="lg:col-span-2 bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="p-4 border-b flex flex-wrap justify-between items-center bg-gray-50 gap-4">
+                        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                             <i data-lucide="list" class="text-gray-500"></i> <span id="input-table-title">校庭</span> の履歴
+                        </h2>
+                        <div class="flex items-center gap-2 text-sm bg-white p-2 rounded border shadow-sm"><input type="month" id="export-start" class="border p-1"><span>〜</span><input type="month" id="export-end" class="border p-1"><button onclick="exportCSV()" class="bg-green-600 text-white px-3 py-1.5 rounded font-bold shadow-sm">CSV</button></div>
+                        <button onclick="clearAllData()" class="text-sm text-red-600 border border-red-600 px-3 py-1 rounded hover:bg-red-50 transition-colors">全削除</button>
+                    </div>
+                    <div class="overflow-x-auto h-[500px] overflow-y-auto"><table class="min-w-full text-sm text-left"><thead class="bg-gray-100 sticky top-0"><tr><th class="px-4 py-3">月日</th><th class="px-4 py-3">時間</th><th class="px-4 py-3">天気</th><th class="px-4 py-3 font-bold">WBGT</th><th class="px-4 py-3">指針</th><th class="px-4 py-3">気温/湿度</th><th class="px-4 py-3 text-right">操作</th></tr></thead><tbody id="input-tbody" class="divide-y"></tbody></table></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 共通ダイアログ類 -->
+        <div id="passcode-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]"><div class="bg-white p-6 rounded-lg shadow-xl w-80 border-t-4 border-blue-500"><h3 class="font-bold mb-4">パスコード変更</h3><input type="text" id="new-passcode-input" class="w-full border rounded p-3 text-xl mb-4" placeholder="新パスコード"><div class="flex justify-end gap-2"><button onclick="closePasscodeModal()" class="px-4 py-2 bg-gray-200 rounded">取消</button><button onclick="saveNewPasscode()" class="px-4 py-2 bg-blue-600 text-white rounded">保存</button></div></div></div>
+        <div id="custom-alert" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[200]"><div class="bg-white p-6 rounded-lg shadow-xl w-80 border-t-4 border-red-500"><p id="custom-alert-msg" class="mb-6 font-bold text-center whitespace-pre-wrap"></p><button id="custom-alert-btn" class="bg-gray-800 text-white font-bold py-3 rounded w-full">OK</button></div></div>
+        <div id="custom-confirm" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[200]"><div class="bg-white p-6 rounded-lg shadow-xl w-80 border-t-4 border-yellow-500"><p id="custom-confirm-msg" class="mb-6 font-bold text-center whitespace-pre-wrap"></p><div class="flex gap-2"><button id="custom-confirm-cancel" class="bg-gray-200 py-3 rounded w-1/2 font-bold transition-colors">いいえ</button><button id="custom-confirm-ok" class="bg-red-600 text-white py-3 rounded w-1/2 font-bold transition-colors">はい</button></div></div></div>
+    </main>
+
+    <footer class="py-6 bg-white border-t mt-auto text-center text-gray-500 text-xs tracking-widest">©2026　暑さ指数掲示板　ICT支援の杜</footer>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // 状態管理 & ロジック定義
+        // ==========================================
+        let appState = {
+            records: [], 
+            boardDate: new Date(), // 初期値：現在
+            user: null, 
+            isUnlocked: false,
+            passcode: "1234", 
+            currentLocation: "校庭" 
+        };
+        let lastApiResult = null;
+
+        function getGuidance(wbgt) {
+            const val = parseFloat(wbgt);
+            if (isNaN(val)) return { text: '-', class: '' };
+            if (val >= 31) return { text: '危険', class: 'bg-danger' };
+            if (val >= 28) return { text: '厳重警戒', class: 'bg-severe' };
+            if (val >= 25) return { text: '警戒', class: 'bg-warning' };
+            if (val >= 21) return { text: '注意', class: 'bg-caution' };
+            return { text: 'ほぼ安全', class: 'bg-safe' };
+        }
+
+        function formatDateJapanese(dateStr) {
+            if (!dateStr) return "-";
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return dateStr;
+            return `${parts[0]}年${parseInt(parts[1], 10)}月${parseInt(parts[2], 10)}日`;
+        }
+
+        window.showAlertAsync = (msg) => new Promise(res => {
+            const modal = document.getElementById('custom-alert'), msgEl = document.getElementById('custom-alert-msg'), btn = document.getElementById('custom-alert-btn');
+            if(!modal) { console.warn(msg); res(); return; }
+            msgEl.textContent = msg; modal.classList.remove('hidden'); btn.onclick = () => { modal.classList.add('hidden'); res(); };
+        });
+
+        window.showConfirmAsync = (msg) => new Promise(res => {
+            const modal = document.getElementById('custom-confirm'), msgEl = document.getElementById('custom-confirm-msg');
+            if(!modal) { res(false); return; }
+            msgEl.textContent = msg; modal.classList.remove('hidden');
+            document.getElementById('custom-confirm-ok').onclick = () => { modal.classList.add('hidden'); res(true); };
+            document.getElementById('custom-confirm-cancel').onclick = () => { modal.classList.add('hidden'); res(false); };
+        });
+
+        window.renderBoard = () => {
+            const d = appState.boardDate, displayEl = document.getElementById('board-date-display');
+            if(displayEl) displayEl.textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+            const dStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            const rows = appState.records.filter(r => r.date === dStr && (r.location === appState.currentLocation || (!r.location && appState.currentLocation === "校庭"))).sort((a,b) => a.time.localeCompare(b.time));
+            const tb = document.getElementById('board-tbody'); if(!tb) return;
+            tb.innerHTML = rows.length ? '' : `<tr><td colspan="6" class="py-10 text-gray-400 text-xl font-bold text-center">本日はまだデータが入力されていません。<br><span class="text-sm font-normal">(${appState.currentLocation})</span></td></tr>`;
+            rows.forEach(r => {
+                const g = getGuidance(r.wbgt), tr = document.createElement('tr');
+                tr.className = "border-b-4 border-gray-400 hover:bg-gray-50 transition-colors";
+                tr.innerHTML = `<td class="py-6 border-r-2 border-gray-800 font-black text-4xl">${r.time}</td><td class="py-6 border-r-2 border-gray-800 text-6xl drop-shadow-sm">${r.weather}</td><td class="py-6 border-r-2 border-gray-800 font-black text-6xl ${parseFloat(r.wbgt)>=28?'text-red-600':''}">${r.wbgt}</td><td class="py-6 border-r-2 border-gray-800 font-black text-3xl ${g.class} tracking-tight">${g.text}</td><td class="py-6 border-r-2 border-gray-800 font-bold text-5xl">${r.temp||'-'}</td><td class="py-6 font-bold text-5xl">${r.humidity||'-'}</td>`;
+                tb.appendChild(tr);
+            });
+        };
+
+        window.renderInputTable = () => {
+            const tb = document.getElementById('input-tbody'); if(!tb) return;
+            tb.innerHTML = '';
+            const filtered = appState.records.filter(r => (r.location === appState.currentLocation || (!r.location && appState.currentLocation === "校庭")));
+            filtered.forEach(r => {
+                const g = getGuidance(r.wbgt), tr = document.createElement('tr');
+                tr.innerHTML = `<td class="px-4 py-3">${formatDateJapanese(r.date)}</td><td class="px-4 py-3">${r.time}</td><td class="px-4 py-3">${r.weather}</td><td class="px-4 py-3 font-bold">${r.wbgt}</td><td class="px-4 py-3"><span class="${g.class} px-2 py-1 rounded text-xs font-bold shadow-sm">${g.text}</span></td><td class="px-4 py-3">${r.temp||'-'}℃ / ${r.humidity||'-'}%</td><td class="px-4 py-3 text-right"><button class="text-red-500 hover:text-red-700 p-2 rounded-full transition-colors delete-btn" data-id="${r.id}"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>`;
+                tb.appendChild(tr);
+            });
+            document.querySelectorAll('.delete-btn').forEach(btn => btn.onclick = () => deleteRecord(btn.dataset.id));
+            document.getElementById('input-form-title').textContent = appState.currentLocation;
+            document.getElementById('input-table-title').textContent = appState.currentLocation;
+            lucide.createIcons();
+        };
+
+        window.switchGlobalLocation = (location) => {
+            appState.currentLocation = location;
+            ['校庭', '体育館'].forEach(loc => {
+                const btn = document.getElementById(`header-loc-${loc}`);
+                btn.className = (loc === location) ? 'py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-active' : 'py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-inactive';
+            });
+            const apiSaveLoc = document.getElementById('api-save-location');
+            if(apiSaveLoc) apiSaveLoc.value = location;
+            renderBoard(); if(appState.isUnlocked) renderInputTable();
+            lucide.createIcons();
+        };
+
+        window.switchTab = (targetTab) => {
+            const tabs = ['board', 'api', 'input'], views = { board: document.getElementById('view-board'), api: document.getElementById('view-api'), input: document.getElementById('view-input'), auth: document.getElementById('view-auth') };
+            tabs.forEach(t => { const btn = document.getElementById(`tab-${t}`); if (btn) btn.className = (t === targetTab) ? 'tab-active px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all' : 'tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all'; });
+            Object.values(views).forEach(view => { if (view) view.classList.add('hidden'); });
+            
+            document.getElementById('api-result-area').classList.add('hidden');
+            lastApiResult = null;
+
+            if (targetTab === 'board') { 
+                views.board.classList.remove('hidden'); 
+                renderBoard(); 
+            } else {
+                if (!appState.isUnlocked) { views.auth.classList.remove('hidden'); const inp = document.getElementById('passcode-input'); if (inp) { inp.value = ''; inp.focus(); } } 
+                else {
+                    if (targetTab === 'api') views.api.classList.remove('hidden'); else if (targetTab === 'input') { views.input.classList.remove('hidden'); renderInputTable(); }
+                }
+            }
+            lucide.createIcons();
+        };
+
+        // 【追加】今日の日付にリセットする関数
+        window.resetBoardDateToToday = () => {
+            appState.boardDate = new Date();
+            renderBoard();
+        };
+
+        let db = null, auth = null, appId = 'default-app-id';
+        async function initFirebase() {
+            try {
+                const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+                if (!configStr) throw new Error("Config not found");
+                const firebaseConfig = JSON.parse(configStr);
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app); db = getFirestore(app);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token); else await signInAnonymously(auth);
+                onAuthStateChanged(auth, user => {
+                    if (user) { appState.user = user;
+                        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'wbgtRecords'), snap => {
+                            const data = []; snap.forEach(d => data.push(d.data()));
+                            data.sort((a,b) => new Date(`${b.date}T${a.time}`) - new Date(`${a.date}T${a.time}`));
+                            appState.records = data; 
+                            renderBoard(); 
+                            if(appState.isUnlocked) renderInputTable();
+                        });
+                        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'passcodeSettings'), snap => {
+                            const docs = []; snap.forEach(d => docs.push(d.data()));
+                            if (docs.length) { docs.sort((a,b) => b.timestamp - a.timestamp); appState.passcode = docs[0].passcode; }
+                        });
+                    }
+                });
+            } catch (e) { console.warn("Cloud features disabled"); }
+        }
+
+        window.verifyPasscode = () => {
+            const inp = document.getElementById('passcode-input'), err = document.getElementById('auth-error');
+            if(inp.value.trim() === appState.passcode){ appState.isUnlocked = true; inp.value = ''; err.classList.add('hidden'); const currentTab = document.getElementById('tab-api').classList.contains('tab-active') ? 'api' : 'input'; switchTab(currentTab); } 
+            else { err.classList.remove('hidden'); inp.value = ''; inp.focus(); }
+        };
+
+        window.lockEditor = () => { appState.isUnlocked = false; const inp = document.getElementById('passcode-input'); if(inp) inp.value = ''; switchTab('board'); };
+
+        window.saveNewPasscode = async () => {
+            const inp = document.getElementById('new-passcode-input'), v = inp.value.trim();
+            if(!v) { await showAlertAsync("パスコードを入力してください。"); return; }
+            if(!(await showConfirmAsync("パスコードを変更しますか？\n(全端末に同期されます)"))) return;
+            try { appState.passcode = v; 
+                if (db && appState.user) await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'passcodeSettings'), { passcode: v, timestamp: Date.now() });
+                document.getElementById('passcode-modal').classList.add('hidden'); inp.value = ''; await showAlertAsync("更新完了");
+            } catch(e) { await showAlertAsync("失敗しました。"); }
+        };
+
+        window.showPasscodeModal = () => { document.getElementById('passcode-modal').classList.remove('hidden'); const inp = document.getElementById('new-passcode-input'); if(inp) { inp.value = ''; inp.focus(); } };
+        window.closePasscodeModal = () => document.getElementById('passcode-modal').classList.add('hidden');
+        window.changeBoardDate = d => { appState.boardDate.setDate(appState.boardDate.getDate()+d); renderBoard(); };
+        
+        window.handleFormSubmit = async e => {
+            e.preventDefault();
+            const time = `${document.getElementById('input-hour').value}:${document.getElementById('input-minute').value}`, date = document.getElementById('input-date').value;
+            const wbgt = document.getElementById('input-wbgt').value, weather = document.getElementById('input-weather').value, temp = document.getElementById('input-temp').value, hum = document.getElementById('input-humidity').value;
+            const rec = { id: Date.now().toString(), date, time, weather, wbgt, temp, humidity: hum, location: appState.currentLocation };
+            if (db) { try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'wbgtRecords', rec.id), rec); await showAlertAsync(`${appState.currentLocation}のデータを保存しました。`); } catch(e) { await showAlertAsync("保存失敗"); } } 
+            else { appState.records.push(rec); renderBoard(); renderInputTable(); await showAlertAsync("ローカル保存完了"); }
+        };
+
+        // ==========================================
+        // 初期化：ここが「今日を開く」核心
+        // ==========================================
+        document.addEventListener('DOMContentLoaded', () => {
+            // 1. 日付を「今」にリセット（ブラウザのキャッシュ対策）
+            appState.boardDate = new Date();
+            
+            const h = document.getElementById('input-hour'), m = document.getElementById('input-minute');
+            if(h && m) {
+                for(let i=0;i<24;i++) h.add(new Option(String(i).padStart(2,'0'), String(i).padStart(2,'0')));
+                for(let i=0;i<60;i+=5) m.add(new Option(String(i).padStart(2,'0'), String(i).padStart(2,'0')));
+                const now = new Date();
+                const dInput = document.getElementById('input-date');
+                if(dInput) dInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                h.value = String(now.getHours()).padStart(2,'0'); m.value = String(Math.floor(now.getMinutes()/5)*5).padStart(2,'0');
+            }
+            const pSel = document.getElementById('api-pref'); 
+            if(pSel) {
+                const prefs = ["栃木県","北海道","青森県","岩手県","宮城県","秋7田県","山形県","福島県","茨城県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+                prefs.forEach(p => pSel.add(new Option(p,p)));
+                pSel.value = "栃木県"; loadCities("栃木県", "那珂川町"); 
+            }
+
+            // 最速で今日を表示
+            renderBoard(); 
+            lucide.createIcons(); 
+            initFirebase();
+            
+            // 毎分更新（もし日付を跨いだらリセットはしないが、表示の整合性は保つ）
+            setInterval(() => { if(!document.getElementById('view-board').classList.contains('hidden')) renderBoard(); }, 60000);
+        });
+
+        window.loadCities = async (targetPref, defCity) => {
+            const p = targetPref || document.getElementById('api-pref').value, cSel = document.getElementById('api-city');
+            if(!p) return; cSel.innerHTML = '<option>読込中...</option>'; cSel.disabled = true;
+            try {
+                const r = await fetch(`https://geoapi.heartrails.com/api/json?method=getCities&prefecture=${encodeURIComponent(p)}`);
+                const d = await r.json(); cSel.innerHTML = '<option value="">選択</option>';
+                if (d.response && d.response.location) { d.response.location.forEach(l => { const o = new Option(l.city, l.city); if(defCity && l.city === defCity) o.selected = true; cSel.add(o); }); cSel.disabled = false; updateCoordinates(); }
+            } catch(e) { cSel.innerHTML = '<option>エラー</option>'; }
+        };
+
+        window.updateCoordinates = async () => {
+            const p = document.getElementById('api-pref').value, c = document.getElementById('api-city').value, b = document.getElementById('btn-fetch');
+            if(!p || !c) return; b.disabled = true;
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(p+c)}&limit=1`);
+                const d = await r.json();
+                if(d && d.length){ document.getElementById('api-lat').value = d[0].lat; document.getElementById('api-lon').value = d[0].lon; b.disabled = false; }
+            } catch(e) { }
+        };
+
+        window.fetchWeatherData = async () => {
+            const b = document.getElementById('btn-fetch'), lat = document.getElementById('api-lat').value, lon = document.getElementById('api-lon').value;
+            if(!lat || !lon) return; 
+            document.getElementById('api-result-area').classList.add('hidden');
+            lastApiResult = null;
+            b.disabled = true;
+            try {
+                const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&timezone=Asia%2FTokyo`);
+                const d = await r.json(); const c = d.current;
+                const temp = c.temperature_2m, hum = c.relative_humidity_2m;
+                let w = "☁️", code = c.weather_code; if(code===0) w="☀️"; else if(code<=3) w="⛅"; else if(code>=51 && code<=67) w="☂️";
+                let wbgt = (0.725 * temp + 0.0368 * hum + 0.00364 * temp * hum - 3.246).toFixed(1);
+                document.getElementById('api-res-weather').textContent = w; document.getElementById('api-res-temp').textContent = temp + "℃"; document.getElementById('api-res-humidity').textContent = hum + "%"; document.getElementById('api-res-wbgt').textContent = wbgt;
+                const g = getGuidance(wbgt); const guidEl = document.getElementById('api-res-guidance'); guidEl.textContent = g.text; guidEl.className = "mt-2 font-bold text-xl px-4 py-1 rounded " + g.class;
+                document.getElementById('api-result-area').classList.remove('hidden');
+                const n = new Date();
+                lastApiResult = { date: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`, time: `${String(n.getHours()).padStart(2,'0')}:${String(Math.floor(n.getMinutes()/5)*5).padStart(2,'0')}`, weather: w, wbgt: wbgt, temp: temp.toFixed(1), humidity: hum.toString() };
+            } catch(e) { await showAlertAsync("取得失敗"); } finally { b.disabled = false; }
+        };
+
+        window.saveApiDataToDb = async () => {
+            if(!lastApiResult) return;
+            const target = document.getElementById('api-save-location').value;
+            const rec = { ...lastApiResult, id: Date.now().toString(), location: target };
+            if (db) { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'wbgtRecords', rec.id), rec); await showAlertAsync(`${target}へ反映しました`); document.getElementById('api-result-area').classList.add('hidden'); lastApiResult = null; switchTab('input'); switchGlobalLocation(target); } 
+            else { appState.records.push(rec); renderBoard(); switchTab('input'); }
+        };
+
+        window.deleteRecord = async id => { if(await showConfirmAsync("削除しますか？")) { if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'wbgtRecords', id)); else { appState.records = appState.records.filter(r => r.id !== id); renderInputTable(); } } };
+        window.clearAllData = async () => { if(await showConfirmAsync("全拠点の全データを消去しますか？")) { if (db) { const s = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'wbgtRecords')); for (const d of s.docs) await deleteDoc(d.ref); } else { appState.records = []; renderInputTable(); } } };
+        window.exportCSV = async () => {
+            const sInp = document.getElementById('export-start').value, eInp = document.getElementById('export-end').value;
+            if(!sInp || !eInp) return;
+            const targets = appState.records.filter(r => { const ym = r.date.substring(0,7); return ym>=sInp && ym<=eInp; });
+            if(!targets.length) return await showAlertAsync("データなし");
+            let csv = "日付,時間,場所,天気,暑さ指数(WBGT),指針,気温,湿度\n";
+            targets.forEach(r => csv += `"${r.date}","${r.time}","${r.location || '校庭'}","${r.weather}","${r.wbgt}","${getGuidance(r.wbgt).text}","${r.temp}","${r.humidity}"\n`);
+            const b = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], {type:"text/csv"});
+            const l = document.createElement('a'); l.href = URL.createObjectURL(b); l.download = `WBGT記録_${sInp}_${eInp}.csv`; l.click();
+        };
+    </script>
+</body>
+</html>
